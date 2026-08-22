@@ -1,0 +1,239 @@
+--- src/app/admin/page.tsx
++++ src/app/admin/page.tsx
+@@ -38,13 +38,13 @@ const AnimatedNumber = ({ value, isCurrency = true }: { value: number, isCurrenc
+ };
+ 
+ // Therapist Status Dashboard Widget
+-function TherapistStatusWidget({ showBalance, filterBranch }: { showBalance: boolean, filterBranch: string }) {
++function TherapistStatusWidget({ showBalance }: { showBalance: boolean }) {
+   const [counts, setCounts] = useState({ AVAILABLE: 0, BUSY: 0, BREAK: 0, OFF: 0, total: 0 });
+ 
+   useEffect(() => {
+     const fetchStatus = async () => {
+       try {
+-        const res = await fetch(`/api/therapists/availability?branchId=${filterBranch}`);
++        const res = await fetch(`/api/therapists/availability`);
+         if (res.ok) {
+           const data = await res.json();
+           const list = data.data || [];
+@@ -61,7 +61,7 @@ function TherapistStatusWidget({ showBalance, filterBranch }: { showBalance: boo
+     fetchStatus();
+     const interval = setInterval(fetchStatus, 10000);
+     return () => clearInterval(interval);
+-  }, [filterBranch]);
++  }, []);
+ 
+   return (
+     <div className="bg-gray-50/50 border border-gray-200/60 shadow-[0_2px_10px_rgba(0,0,0,0.02)] rounded-[20px] p-5 flex flex-col justify-between min-h-[155px] hover:bg-white hover:shadow-md hover:border-purple-400 hover:-translate-y-1.5 transition-all duration-300 group">
+@@ -105,9 +105,6 @@ export default function AdminDashboard() {
+   });
+   
+   const [session, setSession] = useState<any>(null);
+-  const [branches, setBranches] = useState<any[]>([]);
+-  const [filterBranch, setFilterBranch] = useState("");
+-  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
+ 
+   const [targetIncome, setTargetIncome] = useState(0);
+   const [targetVisits, setTargetVisits] = useState(0);
+@@ -123,6 +120,8 @@ export default function AdminDashboard() {
+     pendapatanHarian: 0,
+     transaksiHarian: 0,
+     pendapatanKemarin: 0,
++    pengeluaranOperasionalHarian: 0,
++    pengeluaranOperasionalKemarin: 0,
+     reservationsBaru: 0,
+     topServicesToday: [],
+   });
+@@ -140,7 +139,7 @@ export default function AdminDashboard() {
+     setAiResult(null);
+     setAiError(null);
+     try {
+-      const res = await fetch(`/api/ai-analysis?month=${month}&branchId=${filterBranch}`);
++      const res = await fetch(`/api/ai-analysis?month=${month}`);
+       const json = await res.json();
+       if (json.success) {
+         setAiResult(json.data);
+@@ -157,10 +156,9 @@ export default function AdminDashboard() {
+   const fetchData = async () => {
+     setLoading(true);
+     try {
+-      const [kpiRes, summaryRes, branchRes, sessionRes] = await Promise.all([
+-        fetch(`/api/dashboard/kpi-chart?month=${month}&branchId=${filterBranch}`),
+-        fetch(`/api/dashboard/summary?month=${month}&branchId=${filterBranch}`),
+-        fetch("/api/branches"),
++      const [kpiRes, summaryRes, sessionRes] = await Promise.all([
++        fetch(`/api/dashboard/kpi-chart?month=${month}`),
++        fetch(`/api/dashboard/summary?month=${month}`),
+         fetch("/api/auth/session")
+       ]);
+ 
+@@ -180,11 +178,6 @@ export default function AdminDashboard() {
+         }
+       }
+       
+-      if (branchRes.ok) {
+-        const bJson = await branchRes.json();
+-        setBranches(bJson.data || []);
+-      }
+-      
+       if (sessionRes.ok) {
+         const sJson = await sessionRes.json();
+         setSession(sJson.session);
+@@ -197,16 +190,8 @@ export default function AdminDashboard() {
+   };
+ 
+   useEffect(() => {
+-    const match = document.cookie.match(new RegExp('(^| )radja-bekam-selected-branch=([^;]+)'));
+-    const currentBranch = match ? match[2] : "ALL";
+-    setFilterBranch(currentBranch);
+-  }, []);
+-
+-  useEffect(() => {
+-    if (filterBranch) {
+-      fetchData();
+-    }
+-  }, [month, filterBranch]);
++    fetchData();
++  }, [month]);
+ 
+   const handleSaveTarget = async (e: React.FormEvent) => {
+     e.preventDefault();
+@@ -227,80 +212,7 @@ export default function AdminDashboard() {
+     }
+   };
+ 
+-  const handleDashboardBranchChange = (value: string) => {
+-    setFilterBranch(value);
+-    document.cookie = `radja-bekam-selected-branch=${value}; path=/; max-age=${60 * 60 * 24 * 30}`;
+-    setIsBranchDropdownOpen(false);
+-  };
+-
+-  const BranchSelector = () => {
+-    if (session?.role !== "SUPER_ADMIN" && session?.role !== "INVESTOR") return null;
+ 
+-    return (
+-      <div className="relative z-50">
+-        <button
+-          onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+-          className="flex items-center gap-2 bg-gradient-to-br from-indigo-50 to-blue-50 border border-blue-100 hover:border-blue-300 text-blue-700 px-3.5 py-2 rounded-xl shadow-[0_2px_10px_rgba(59,130,246,0.08)] transition-all group"
+-        >
+-          <div className="bg-blue-600 rounded-lg p-1 shadow-sm group-hover:scale-105 transition-transform">
+-             <MapPin className="w-3.5 h-3.5 text-white" />
+-          </div>
+-          <span className="text-xs md:text-sm font-bold truncate max-w-[140px] md:max-w-[200px]">
+-            {filterBranch === "ALL" || filterBranch === "" 
+-              ? "Semua Cabang (Pusat)" 
+-              : branches.find(b => b.id === filterBranch)?.name || "Pilih Cabang"}
+-          </span>
+-          <ChevronDown className={`w-3.5 h-3.5 text-blue-500 transition-transform ${isBranchDropdownOpen ? 'rotate-180' : ''}`} />
+-        </button>
+-
+-        {isBranchDropdownOpen && (
+-          <>
+-            <div 
+-              className="fixed inset-0 z-40" 
+-              onClick={() => setIsBranchDropdownOpen(false)} 
+-            />
+-            <div className="absolute right-0 top-full mt-2 z-50 w-[280px] bg-white/95 backdrop-blur-2xl rounded-2xl shadow-[0_20px_40px_rgba(0,0,0,0.12)] border border-gray-100 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar p-2 space-y-1">
+-                <button
+-                  onClick={() => handleDashboardBranchChange("ALL")}
+-                  className={`w-full text-left px-3 py-2.5 rounded-xl text-sm font-bold flex items-center justify-between transition-colors ${
+-                    (filterBranch === "ALL" || filterBranch === "")
+-                      ? "bg-blue-600 text-white shadow-md" 
+-                      : "text-gray-700 hover:bg-gray-100"
+-                  }`}
+-                >
+-                  <div className="flex items-center gap-2">
+-                    <div className={`p-1.5 rounded-lg ${(filterBranch === "ALL" || filterBranch === "") ? "bg-white/20" : "bg-gray-200"}`}>
+-                       <MapPin className="w-3.5 h-3.5" />
+-                    </div>
+-                    Semua Cabang (Pusat)
+-                  </div>
+-                  {(filterBranch === "ALL" || filterBranch === "") && <Check className="w-4 h-4 text-white shrink-0" />}
+-                </button>
+-                
+-                {branches.length > 0 && <div className="h-px bg-gray-100 my-2 mx-2" />}
+-                
+-                {branches.map(b => (
+-                  <button
+-                    key={b.id}
+-                    onClick={() => handleDashboardBranchChange(b.id)}
+-                    className={`w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-between transition-colors ${
+-                      filterBranch === b.id 
+-                        ? "bg-blue-50 text-blue-700 border border-blue-100 shadow-sm" 
+-                        : "text-gray-600 hover:bg-gray-50 border border-transparent"
+-                    }`}
+-                  >
+-                    <span className="truncate pr-2">{b.name}</span>
+-                    {filterBranch === b.id && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+-                  </button>
+-                ))}
+-              </div>
+-            </div>
+-          </>
+-        )}
+-      </div>
+-    );
+-  };
+ 
+   const quickLinks = [
+     { name: "Keuangan", icon: WalletCards, href: "/admin/finance", color: "text-blue-400", bg: "bg-blue-400/10" },
+@@ -339,7 +251,6 @@ export default function AdminDashboard() {
+           </div>
+           {/* Mobile Branch Selector */}
+           <div className="flex justify-start w-full z-50 relative">
+-            <BranchSelector />
+           </div>
+         </div>
+ 
+@@ -351,7 +262,6 @@ export default function AdminDashboard() {
+             icon={LayoutDashboard}
+             rightContent={
+               <div className="flex items-center gap-3 z-50">
+-                <BranchSelector />
+                 <div className="bg-white/80 backdrop-blur-md px-4 py-2 rounded-xl border border-gray-100 shadow-[0_2px_8px_rgba(0,0,0,0.03)] flex items-center gap-2">
+                   <Clock className="w-4 h-4 text-blue-600" />
+                   <span className="text-xs font-bold text-gray-600">Update terakhir: <span className="text-gray-900">{new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB</span></span>
+@@ -512,27 +422,27 @@ export default function AdminDashboard() {
+                   </div>
+ 
+                   {/* Terapis Hari Ini ΓÇö Live Status */}
+-                  <TherapistStatusWidget showBalance={showBalance} filterBranch={filterBranch} />
++                  <TherapistStatusWidget showBalance={showBalance} />
+ 
+-                  {/* Total Persediaan */}
+-                  <div className="bg-gray-50/50 border border-gray-200/60 shadow-[0_2px_10px_rgba(0,0,0,0.02)] rounded-[20px] p-5 flex flex-col justify-between min-h-[155px] hover:bg-white hover:shadow-md hover:border-amber-400 hover:-translate-y-1.5 transition-all duration-300 group">
++                  {/* Pengeluaran Operasional Hari Ini */}
++                  <div className="bg-gray-50/50 border border-gray-200/60 shadow-[0_2px_10px_rgba(0,0,0,0.02)] rounded-[20px] p-5 flex flex-col justify-between min-h-[155px] hover:bg-white hover:shadow-md hover:border-orange-400 hover:-translate-y-1.5 transition-all duration-300 group">
+                     <div className="flex items-center gap-3 mb-4">
+-                      <div className="w-10 h-10 rounded-[12px] bg-amber-50 border border-amber-100 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+-                        <Package className="w-5 h-5 text-amber-700" />
++                      <div className="w-10 h-10 rounded-[12px] bg-orange-50 border border-orange-100 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
++                        <TrendingDown className="w-5 h-5 text-orange-700" />
+                       </div>
+-                      <span className="text-[11px] font-black text-amber-800 uppercase tracking-wider leading-tight">Total<br/>Persediaan</span>
++                      <span className="text-[11px] font-black text-orange-800 uppercase tracking-wider leading-tight">Pengeluaran<br/>Operasional</span>
+                     </div>
+                     <div>
+-                      <p className="text-[10px] text-gray-500 font-medium mb-1">Stok Barang Klinik</p>
+-                      <div className="flex items-baseline gap-1.5">
+-                        <p className="text-3xl xl:text-4xl font-black text-amber-600 tracking-tighter leading-none"><AnimatedNumber value={summaryData.persediaan || 0} isCurrency={false}/></p>
+-                        <span className="text-[11px] font-bold text-amber-500 uppercase tracking-widest">Item</span>
+-                      </div>
++                      <p className="text-[10px] text-gray-500 font-medium mb-1">Pengeluaran Hari Ini</p>
++                      <p className="text-xl xl:text-2xl font-black text-orange-600 tracking-tighter">{showBalance ? <AnimatedNumber value={summaryData.pengeluaranOperasionalHarian} /> : <span className="tracking-wider">Rp ΓÇóΓÇóΓÇóΓÇóΓÇóΓÇó</span>}</p>
+                       <div className="flex items-center gap-1 mt-1.5">
+-                        <span className="flex items-center text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">
+-                          ≡ƒôª Tersedia
++                        <span className={`flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded border ${Number(summaryData.pengeluaranOperasionalHarian) <= Number(summaryData.pengeluaranOperasionalKemarin || 0) ? 'text-blue-600 bg-blue-50 border-blue-100' : 'text-rose-600 bg-rose-50 border-rose-100'}`}>
++                          {Number(summaryData.pengeluaranOperasionalHarian) <= Number(summaryData.pengeluaranOperasionalKemarin || 0) ? '≡ƒƒó Γåô' : '≡ƒö┤ Γåæ'} 
++                          {Number(summaryData.pengeluaranOperasionalKemarin) > 0 
++                            ? ` ${(Number(summaryData.pengeluaranOperasionalHarian) >= Number(summaryData.pengeluaranOperasionalKemarin) ? '+' : '')}${Math.round((Number(summaryData.pengeluaranOperasionalHarian) - Number(summaryData.pengeluaranOperasionalKemarin)) / Number(summaryData.pengeluaranOperasionalKemarin) * 100)}%` 
++                            : (Number(summaryData.pengeluaranOperasionalHarian) > 0 ? ' +100%' : ' 0%')}
+                         </span>
+-                        <span className="text-[9px] text-amber-600/70 font-medium">dalam sistem</span>
++                        <span className="text-[9px] text-gray-500 font-medium">vs kemarin</span>
+                       </div>
+                     </div>
+                   </div>

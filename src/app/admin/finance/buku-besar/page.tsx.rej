@@ -1,0 +1,55 @@
+--- src/app/admin/finance/buku-besar/page.tsx
++++ src/app/admin/finance/buku-besar/page.tsx
+@@ -43,8 +43,6 @@ export default function BukuBesarPage() {
+   const [branches, setBranches] = useState<Branch[]>([]);
+   const [loading, setLoading] = useState(true);
+ 
+-  // Filter state
+-  const [filterBranch, setFilterBranch] = useState("");
+   const [dateFilter, setDateFilter] = useState("thisMonth");
+   const [customStart, setCustomStart] = useState("");
+   const [customEnd, setCustomEnd] = useState("");
+@@ -123,7 +121,6 @@ export default function BukuBesarPage() {
+     try {
+       const { startDate, endDate } = getDateRange();
+       const params = new URLSearchParams();
+-      params.append("branch", filterBranch || "ALL");
+       if (startDate)    params.append("startDate", startDate);
+       if (endDate)      params.append("endDate", endDate);
+       const res = await fetch(`/api/finance?${params}`);
+@@ -145,7 +142,7 @@ export default function BukuBesarPage() {
+   useEffect(() => {
+     if (dateFilter === "custom" && (!customStart || !customEnd)) return;
+     fetchData();
+-  }, [filterBranch, dateFilter, customStart, customEnd]);
++  }, [dateFilter, customStart, customEnd]);
+ 
+   // Kelompokkan per kategori (urutan sesuai kemunculan pertama)
+   const grouped = useMemo(() => {
+@@ -157,9 +154,7 @@ export default function BukuBesarPage() {
+     return map;
+   }, [transactions]);
+ 
+-  const branchName = filterBranch
+-    ? branches.find(b => b.id === filterBranch)?.name ?? filterBranch
+-    : "Semua Cabang";
++  const branchName = "Sesuai Cabang Aktif";
+ 
+   // ΓöÇΓöÇ Export helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+   const buildExportRows = () => {
+@@ -252,15 +247,6 @@ export default function BukuBesarPage() {
+           icon={BookOpen}
+           rightContent={
+             <div className="flex flex-wrap items-center gap-3">
+-              {/* Cabang */}
+-              <select
+-                value={filterBranch}
+-                onChange={e => setFilterBranch(e.target.value)}
+-                className="px-4 py-2 bg-white border border-gray-200 shadow-sm rounded-xl text-gray-700 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
+-              >
+-                <option value="">Semua Cabang</option>
+-                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+-              </select>
+ 
+               {/* Periode */}
+               <select

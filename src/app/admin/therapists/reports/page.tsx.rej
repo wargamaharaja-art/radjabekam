@@ -1,0 +1,82 @@
+--- src/app/admin/therapists/reports/page.tsx
++++ src/app/admin/therapists/reports/page.tsx
+@@ -75,8 +75,6 @@ export default function TherapistReportsPage() {
+     text: string;
+   } | null>(null);
+   const [session, setSession] = useState<any>(null);
+-  const [branches, setBranches] = useState<any[]>([]);
+-  const [filterBranch, setFilterBranch] = useState("ALL");
+ 
+   // Modal Edit state
+   const [isModalOpen, setIsModalOpen] = useState(false);
+@@ -95,9 +93,8 @@ export default function TherapistReportsPage() {
+             ? `/api/therapist-reports?month=${targetMonth}`
+             : `/api/therapist-reports?startDate=${start}&endDate=${end}`;
+ 
+-        const [res, branchRes, sessionRes] = await Promise.all([
++        const [res, sessionRes] = await Promise.all([
+           fetch(url),
+-          fetch("/api/branches"),
+           fetch("/api/auth/session"),
+         ]);
+         if (res.ok) {
+@@ -109,10 +106,6 @@ export default function TherapistReportsPage() {
+             text: "Gagal memuat data rapor terapis",
+           });
+         }
+-        if (branchRes.ok) {
+-          const bJson = await branchRes.json();
+-          setBranches(bJson.data || []);
+-        }
+         if (sessionRes.ok) {
+           const sJson = await sessionRes.json();
+           setSession(sJson.session);
+@@ -197,9 +190,7 @@ export default function TherapistReportsPage() {
+     }
+   };
+ 
+-  const filteredReports = reports.filter(
+-    (r) => filterBranch === "ALL" || r.branchId === filterBranch,
+-  );
++  const filteredReports = reports;
+ 
+   const handleBulkSave = async () => {
+     const unsaved = filteredReports.filter((r) => !r.isSaved);
+@@ -393,28 +384,6 @@ export default function TherapistReportsPage() {
+           icon={Award}
+           rightContent={
+             <div className="flex flex-col md:flex-row items-center gap-3 mt-4 md:mt-0 w-full md:w-auto">
+-              {/* Branch Filter Dropdown - Only show if Super Admin */}
+-              {session?.role === "SUPER_ADMIN" &&
+-                !loading &&
+-                branches.length > 0 && (
+-                  <div className="relative w-full sm:w-auto">
+-                    <select
+-                      value={filterBranch}
+-                      onChange={(e) => setFilterBranch(e.target.value)}
+-                      className="px-4 py-2.5 bg-white border border-gray-200 text-gray-900 rounded-xl focus:ring-2 focus:ring-teal-500/20 text-sm outline-none cursor-pointer w-full transition-all appearance-none pr-10"
+-                    >
+-                      <option value="ALL">Semua Cabang</option>
+-                      {branches.map((b) => (
+-                        <option key={b.id} value={b.id}>
+-                          {b.name}
+-                        </option>
+-                      ))}
+-                    </select>
+-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 font-bold text-[10px]">
+-                      Γû╝
+-                    </div>
+-                  </div>
+-                )}
+ 
+               {/* Mode Filter Selector */}
+               <div className="flex items-center gap-2 bg-white rounded-xl border border-gray-200 p-1">
+@@ -490,7 +459,7 @@ export default function TherapistReportsPage() {
+                       )
+                         return;
+                       try {
+-                        const res = await fetch("/api/recalculate-commissions");
++                        const res = await fetch("/api/recalculate-commissions", { method: "POST" });
+                         const data = await res.json();
+                         if (data.success) {
+                           alert(data.message);
