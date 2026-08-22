@@ -105,25 +105,22 @@ export async function GET(
         );
     }
 
-    const commByVisitId = new Map();
+    const commsByVisitId = new Map<string, any[]>();
     for (const c of comms) {
-      // Map komisi ke visitId (hanya ambil satu jika ada duplikat untuk visit yang sama agar aman dari perkalian ganda)
-      if (!commByVisitId.has(c.visitId)) {
-        commByVisitId.set(c.visitId, c);
+      if (!commsByVisitId.has(c.visitId)) {
+        commsByVisitId.set(c.visitId, []);
       }
+      commsByVisitId.get(c.visitId)!.push(c);
     }
 
     // Filter visits only for this therapist (either main therapist or has commission)
     const visits = allVisits
-      .filter((v) => v.mainTherapistId === id || commByVisitId.has(v.id))
+      .filter((v) => v.mainTherapistId === id || commsByVisitId.has(v.id))
       .map((v) => {
-        const c = commByVisitId.get(v.id);
+        const visitComms = commsByVisitId.get(v.id) || [];
         return {
           ...v,
-          commissionAmount: c ? c.amount : null,
-          commissionStatus: c ? c.status : null,
-          commissionId: c ? c.id : null,
-          commissionTherapistId: c ? c.therapistId : null,
+          commissions: visitComms,
         };
       });
 
@@ -131,10 +128,6 @@ export async function GET(
     const groupedVisits = new Map<string, any>();
     
     for (const v of visits) {
-      if (v.commissionTherapistId !== null && v.commissionTherapistId !== id) {
-        continue;
-      }
-      
       const key = `${v.visitDate}_${v.visitTime}_${v.patientName}`;
       
       if (!groupedVisits.has(key)) {
@@ -143,49 +136,54 @@ export async function GET(
           serviceName: "",
           servicePrice: 0,
           commissionAmount: 0,
+          commissionStatus: null,
           visitedIds: new Set(),
           dbCommissionIds: new Set(),
-          dynamicCommissionsTotal: 0,
         });
       }
       
       const existing = groupedVisits.get(key);
       
       if (!existing.visitedIds.has(v.id)) {
-        existing.serviceName += existing.serviceName ? `, ${v.serviceName}` : v.serviceName;
+        existing.serviceName += existing.serviceName ? `, ${v.serviceName}` : (v.serviceName || "");
         existing.servicePrice += (v.servicePrice || 0);
         existing.visitedIds.add(v.id);
-        
-        let dynamicComm = 0;
-        if (v.paymentStatus !== "PAID" && v.mainTherapistId === id) {
-          dynamicComm = await calculateTherapistCommission(
-            db,
-            id,
-            v.serviceId,
-            1
-          );
-        }
-        existing.dynamicCommissionsTotal += dynamicComm;
         
         if (v.status === "in_progress") {
           existing.status = "in_progress";
         }
       }
       
-      if (v.commissionId && !existing.dbCommissionIds.has(v.commissionId)) {
-        existing.dbCommissionIds.add(v.commissionId);
-        existing.commissionAmount += v.commissionAmount;
+      if (v.commissions && v.commissions.length > 0) {
+        for (const c of v.commissions) {
+          if (!existing.dbCommissionIds.has(c.id)) {
+            existing.dbCommissionIds.add(c.id);
+            existing.commissionAmount += c.amount;
+            if (c.status === "PAID") {
+              existing.commissionStatus = "PAID";
+            } else if (!existing.commissionStatus) {
+              existing.commissionStatus = c.status;
+            }
+          }
+        }
+      } else if (v.paymentStatus !== "PAID" && v.mainTherapistId === id) {
+        const dynamicComm = await calculateTherapistCommission(
+          db,
+          id,
+          v.serviceId,
+          1
+        );
+        existing.commissionAmount += dynamicComm;
+        if (!existing.commissionStatus) {
+          existing.commissionStatus = "PENDING";
+        }
       }
     }
     
     for (const group of groupedVisits.values()) {
-      if (group.dbCommissionIds.size === 0) {
-        group.commissionAmount = group.dynamicCommissionsTotal;
-      }
       delete group.visitedIds;
       delete group.dbCommissionIds;
-      delete group.dynamicCommissionsTotal;
-      delete group.commissionId;
+      delete group.commissions;
     }
     
     const combinedVisits = Array.from(groupedVisits.values());

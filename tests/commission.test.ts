@@ -45,13 +45,14 @@ test("Sistem Komisi Terapis - Hierarki", async (t) => {
     assert.equal(result, 80000, "Gagal menghitung persentase untuk serviceGlobalCommission <= 100");
   });
 
-  await t.test("Percentage: Perkalian Qty untuk persentase", () => {
+  await t.test("Buku Pasien & Item Komisi 0: Harus mengembalikan komisi 0", () => {
     const result = calculateCommissionAmount({
-      serviceGlobalCommission: 50,
-      servicePrice: 200000,
-      qty: 3
+      serviceGlobalCommission: 0,
+      servicePrice: 5000,
+      qty: 1
     });
-    assert.equal(result, 300000, "Gagal mengkalikan qty untuk persentase");
+    assert.equal(result, 0, "Buku Pasien tidak boleh menghasilkan komisi");
   });
 
 });
+

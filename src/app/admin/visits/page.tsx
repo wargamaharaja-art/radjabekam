@@ -738,7 +738,6 @@ export default function AdminVisitsPage() {
     }
     
     setPosBranchId(branchId);
-    setPosTherapistId(therapistId || "");
     
     // Set date based on visit if available, else today
     const visit = visits.find(v => v.id === visitId);
@@ -757,6 +756,9 @@ export default function AdminVisitsPage() {
     
     setPosVisitIds(ids);
     setPosVisitId(ids[0] || null);
+
+    const detectedTherapistId = therapistId || relevantVisits.find(v => v.therapistId)?.therapistId || "";
+    setPosTherapistId(detectedTherapistId);
 
     const newItems: InvoiceItem[] = [];
     for (const v of relevantVisits) {

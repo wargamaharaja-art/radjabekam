@@ -439,21 +439,32 @@ export async function POST(request: Request) {
       }
 
       // 9. Sync patientVisits with POS items
-      // Kita HANYA memperbarui visit original utama, atau membuat satu visit jika standalone.
       const visitsToMark =
         visitIds && visitIds.length > 0 ? visitIds : visitId ? [visitId] : [];
-      const finalVisitIds: string[] = [];
-      // primaryVisitId sudah dideklarasikan di atas
+
+      // Cari seluruh kunjungan milik pasien pada tanggal & cabang ini yang belum lunas
+      const autoFoundUnpaidVisits = await tx
+        .select()
+        .from(patientVisits)
+        .where(
+          and(
+            eq(patientVisits.patientId, patientId),
+            eq(patientVisits.branchId, finalBranchId),
+            eq(patientVisits.visitDate, visitDateStr),
+            eq(patientVisits.paymentStatus, "UNPAID")
+          )
+        );
+
+      const allVisitsToMarkIds = Array.from(
+        new Set([
+          ...visitsToMark,
+          ...autoFoundUnpaidVisits.map((v) => v.id),
+        ])
+      );
 
       let visitsDetails: (typeof patientVisits.$inferSelect)[] = [];
 
-      if (visitsToMark.length > 0) {
-        finalVisitIds.push(...visitsToMark);
-        visitsDetails = await tx
-          .select()
-          .from(patientVisits)
-          .where(inArray(patientVisits.id, visitsToMark));
-
+      if (allVisitsToMarkIds.length > 0) {
         await tx
           .update(patientVisits)
           .set({
@@ -462,33 +473,51 @@ export async function POST(request: Request) {
             updatedAt: now,
             ...(therapistId && { therapistId }),
           })
-          .where(inArray(patientVisits.id, visitsToMark));
-      } else {
-        // POS standalone
-        primaryVisitId = `V-${Date.now()}`;
-        finalVisitIds.push(primaryVisitId);
-        visitsDetails = [
-          {
-            id: primaryVisitId,
-            serviceId: items[0]?.serviceId || "MANUAL",
-          } as any,
-        ];
-        await tx.insert(patientVisits).values({
-          id: primaryVisitId,
-          patientId: patientId,
-          serviceId: items[0]?.serviceId || "MANUAL",
-          branchId: finalBranchId,
-          therapistId: therapistId || null,
-          visitDate: visitDateStr,
-          visitTime: transactionDate.split("T")[1]?.substring(0, 5) || "00:00",
-          status: "completed",
-          paymentStatus: "PAID",
-        });
+          .where(inArray(patientVisits.id, allVisitsToMarkIds));
+
+        visitsDetails = await tx
+          .select()
+          .from(patientVisits)
+          .where(inArray(patientVisits.id, allVisitsToMarkIds));
+      }
+
+      // Pastikan SETIAP item di invoice memiliki patientVisit record tersendiri (1 item = 1 visit)
+      const availableVisits = [...visitsDetails];
+      const itemToVisitMap: { serviceId: string; visitId: string; item: any }[] = [];
+
+      for (const item of items) {
+        const serviceId = item.serviceId;
+        if (!serviceId) continue;
+
+        // Cari visit yang cocok dengan serviceId
+        const vIdx = availableVisits.findIndex((v) => v.serviceId === serviceId);
+        if (vIdx >= 0) {
+          const matchedVisit = availableVisits.splice(vIdx, 1)[0];
+          itemToVisitMap.push({ serviceId, visitId: matchedVisit.id, item });
+        } else {
+          // Buat visit baru untuk item ini jika belum ada (misal standalone POS atau item add-on di kasir)
+          const newVisitId = `V-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+          await tx.insert(patientVisits).values({
+            id: newVisitId,
+            patientId: patientId,
+            serviceId: serviceId,
+            branchId: finalBranchId,
+            therapistId: therapistId || null,
+            visitDate: visitDateStr,
+            visitTime: transactionDate.split("T")[1]?.substring(0, 5) || "00:00",
+            status: "completed",
+            paymentStatus: "PAID",
+          });
+          itemToVisitMap.push({ serviceId, visitId: newVisitId, item });
+        }
+      }
+
+      if (itemToVisitMap.length > 0 && !primaryVisitId) {
+        primaryVisitId = itemToVisitMap[0].visitId;
       }
 
       // 10. Create therapist commission if applicable
-      if (therapistId && finalVisitIds.length > 0) {
-        primaryVisitId = finalVisitIds[0];
+      if (therapistId && itemToVisitMap.length > 0) {
         const therapistRecords = await tx
           .select()
           .from(therapists)
@@ -500,11 +529,8 @@ export async function POST(request: Request) {
           let totalCommission = 0;
           const commissionDetails = [];
 
-          // Calculate TOTAL commission for ALL items
-          const availableVisits = [...visitsDetails];
-          for (const item of items) {
-            const serviceId = item.serviceId;
-            if (!serviceId) continue;
+          for (const entry of itemToVisitMap) {
+            const { serviceId, visitId: targetVisitId, item } = entry;
 
             const commissionAmount = await calculateTherapistCommission(
               tx,
@@ -517,18 +543,10 @@ export async function POST(request: Request) {
               totalCommission += commissionAmount;
               commissionDetails.push(item.name || serviceId);
 
-              const vIdx = availableVisits.findIndex(
-                (v) => v.serviceId === serviceId,
-              );
-              const assignedVisitId =
-                vIdx >= 0
-                  ? availableVisits.splice(vIdx, 1)[0].id
-                  : primaryVisitId;
-
               await tx.insert(therapistCommissions).values({
                 id: crypto.randomUUID(),
                 therapistId,
-                visitId: assignedVisitId,
+                visitId: targetVisitId,
                 amount: commissionAmount,
                 status: "PAID",
                 paidAt: now,
