@@ -5,6 +5,7 @@ import {
   patientVisits,
   therapistMonthlyReports,
   services,
+  patients,
 } from "@/lib/db/schema";
 import { eq, and, isNotNull, gte, lte, inArray } from "drizzle-orm";
 import crypto from "crypto";
@@ -198,18 +199,31 @@ export async function POST() {
       }
     }
 
-    // 7. Sync reports - update both month-based and date-range-based reports
+    // 7. Sync reports - update all saved reports (month-based and date-range-based)
+    const allReports = await db.select().from(therapistMonthlyReports);
     let syncedReportsCount = 0;
-    for (const affected of affectedMonths) {
-      const [therapistId, month] = affected.split("|");
-      if (!therapistId || !month) continue;
 
-      const [year, m] = month.split("-");
-      const monthStart = `${year}-${m}-01`;
-      const lastDay = new Date(parseInt(year), parseInt(m), 0).getDate();
-      const monthEnd = `${year}-${m}-${String(lastDay).padStart(2, "0")}`;
+    for (const r of allReports) {
+      const dateConditions = [];
+      if (r.startDate && r.endDate) {
+        dateConditions.push(
+          gte(patientVisits.visitDate, r.startDate),
+          lte(patientVisits.visitDate, r.endDate)
+        );
+      } else if (r.month) {
+        const [year, m] = r.month.split("-");
+        const monthStart = `${year}-${m}-01`;
+        const lastDay = new Date(parseInt(year), parseInt(m), 0).getDate();
+        const monthEnd = `${year}-${m}-${String(lastDay).padStart(2, "0")}`;
+        dateConditions.push(
+          gte(patientVisits.visitDate, monthStart),
+          lte(patientVisits.visitDate, monthEnd)
+        );
+      }
 
-      const monthCommissions = await db
+      if (dateConditions.length === 0) continue;
+
+      const comms = await db
         .select({ amount: therapistCommissions.amount })
         .from(therapistCommissions)
         .innerJoin(
@@ -218,61 +232,52 @@ export async function POST() {
         )
         .where(
           and(
-            eq(therapistCommissions.therapistId, therapistId),
-            gte(patientVisits.visitDate, monthStart),
-            lte(patientVisits.visitDate, monthEnd),
+            eq(therapistCommissions.therapistId, r.therapistId),
+            ...dateConditions
           ),
         );
 
-      const totalComm = monthCommissions.reduce((s, c) => s + c.amount, 0);
+      const reportTotalComm = comms.reduce((s, c) => s + (c.amount || 0), 0);
 
-      const reports = await db
-        .select()
-        .from(therapistMonthlyReports)
+      const visits = await db
+        .select({
+          id: patientVisits.id,
+          visitDate: patientVisits.visitDate,
+          visitTime: patientVisits.visitTime,
+          patientId: patientVisits.patientId,
+          patientName: patients.name,
+        })
+        .from(patientVisits)
+        .leftJoin(patients, eq(patientVisits.patientId, patients.id))
         .where(
-          eq(therapistMonthlyReports.therapistId, therapistId),
+          and(
+            eq(patientVisits.therapistId, r.therapistId),
+            eq(patientVisits.status, "completed"),
+            ...dateConditions
+          ),
         );
 
-      const matchingReports = reports.filter((r) => {
-        if (r.month === month) return true;
-        if (r.startDate && r.endDate) {
-          return r.startDate <= monthEnd && r.endDate >= monthStart;
-        }
-        return false;
-      });
+      const uniqueVisits = new Set(visits.map(v => `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`));
+      const totalTreatments = uniqueVisits.size;
 
-      for (const r of matchingReports) {
-        let reportTotalComm = totalComm;
-        if (r.startDate && r.endDate && !r.month) {
-          const rangeCommissions = await db
-            .select({ amount: therapistCommissions.amount })
-            .from(therapistCommissions)
-            .innerJoin(
-              patientVisits,
-              eq(therapistCommissions.visitId, patientVisits.id),
-            )
-            .where(
-              and(
-                eq(therapistCommissions.therapistId, therapistId),
-                gte(patientVisits.visitDate, r.startDate),
-                lte(patientVisits.visitDate, r.endDate),
-              ),
-            );
-          reportTotalComm = rangeCommissions.reduce((s, c) => s + c.amount, 0);
-        }
+      const newThp =
+        (r.baseSalary || 0) +
+        reportTotalComm +
+        (r.allowances || 0) +
+        (r.bonuses || 0) -
+        (r.deductions || 0);
 
-        const newThp =
-          r.baseSalary + reportTotalComm + r.allowances + r.bonuses - r.deductions;
-        await db
-          .update(therapistMonthlyReports)
-          .set({
-            commissions: reportTotalComm,
-            takeHomePay: newThp,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(therapistMonthlyReports.id, r.id));
-        syncedReportsCount++;
-      }
+      await db
+        .update(therapistMonthlyReports)
+        .set({
+          commissions: reportTotalComm,
+          totalTreatments,
+          takeHomePay: newThp,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(therapistMonthlyReports.id, r.id));
+
+      syncedReportsCount++;
     }
 
     return NextResponse.json({

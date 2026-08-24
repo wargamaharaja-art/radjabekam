@@ -69,7 +69,7 @@ export async function GET(
       visitConditions.push(eq(patientVisits.branchId, branchFilter));
     }
 
-    // Fetch all visits in this month for this branch first
+    // Fetch all visits in this date range for this therapist
     const allVisits = await db
       .select({
         id: patientVisits.id,
@@ -78,6 +78,7 @@ export async function GET(
         status: patientVisits.status,
         paymentStatus: patientVisits.paymentStatus,
         patientName: patients.name,
+        patientId: patientVisits.patientId,
         serviceName: services.name,
         servicePrice: services.price,
         serviceId: patientVisits.serviceId,
@@ -128,7 +129,7 @@ export async function GET(
     const groupedVisits = new Map<string, any>();
     
     for (const v of visits) {
-      const key = `${v.visitDate}_${v.visitTime}_${v.patientName}`;
+      const key = `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`;
       
       if (!groupedVisits.has(key)) {
         groupedVisits.set(key, {
@@ -170,7 +171,7 @@ export async function GET(
             }
           }
         }
-      } else if (v.paymentStatus !== "PAID" && v.mainTherapistId === id) {
+      } else if (v.mainTherapistId === id && v.serviceId) {
         if (!existing.visitedCommVisitIds.has(v.id)) {
           existing.visitedCommVisitIds.add(v.id);
           const dynamicComm = await calculateTherapistCommission(
@@ -181,7 +182,7 @@ export async function GET(
           );
           existing.commissionAmount += dynamicComm;
           if (!existing.commissionStatus) {
-            existing.commissionStatus = "PENDING";
+            existing.commissionStatus = v.paymentStatus === "PAID" ? "PAID" : "PENDING";
           }
         }
       }

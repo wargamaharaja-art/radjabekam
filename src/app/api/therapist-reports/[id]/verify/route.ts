@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
-import { therapistMonthlyReports, therapists, branches, therapistCommissions, patientVisits } from "@/lib/db/schema";
-import { eq, and, like } from "drizzle-orm";
+import { therapistMonthlyReports, therapists, branches, therapistCommissions, patientVisits, patients } from "@/lib/db/schema";
+import { eq, and, or, like, gte, lte } from "drizzle-orm";
 
 export async function POST(
   request: Request,
@@ -21,6 +21,8 @@ export async function POST(
         reportId: therapistMonthlyReports.id,
         therapistId: therapistMonthlyReports.therapistId,
         month: therapistMonthlyReports.month,
+        startDate: therapistMonthlyReports.startDate,
+        endDate: therapistMonthlyReports.endDate,
         totalTreatments: therapistMonthlyReports.totalTreatments,
         attendancePresent: therapistMonthlyReports.attendancePresent,
         attendanceLate: therapistMonthlyReports.attendanceLate,
@@ -79,6 +81,16 @@ export async function POST(
     }
 
     // Hitung ulang komisi & treatment aktual dari DB (real-time, bukan stale)
+    const dateConditions = [];
+    if (report.startDate && report.endDate) {
+      dateConditions.push(
+        gte(patientVisits.visitDate, report.startDate),
+        lte(patientVisits.visitDate, report.endDate)
+      );
+    } else if (report.month) {
+      dateConditions.push(like(patientVisits.visitDate, `${report.month}%`));
+    }
+
     const commissionLogs = await db
       .select({ amount: therapistCommissions.amount })
       .from(therapistCommissions)
@@ -86,7 +98,7 @@ export async function POST(
       .where(
         and(
           eq(therapistCommissions.therapistId, report.therapistId),
-          like(patientVisits.visitDate, `${report.month}%`)
+          ...dateConditions
         )
       );
     const actualCommissions = commissionLogs.reduce((sum, c) => sum + c.amount, 0);
@@ -97,16 +109,22 @@ export async function POST(
         visitDate: patientVisits.visitDate,
         visitTime: patientVisits.visitTime,
         patientId: patientVisits.patientId,
+        patientName: patients.name,
       })
       .from(patientVisits)
+      .leftJoin(patients, eq(patientVisits.patientId, patients.id))
+      .leftJoin(therapistCommissions, eq(patientVisits.id, therapistCommissions.visitId))
       .where(
         and(
-          eq(patientVisits.therapistId, report.therapistId),
+          or(
+            eq(patientVisits.therapistId, report.therapistId),
+            eq(therapistCommissions.therapistId, report.therapistId)
+          ),
           eq(patientVisits.status, "completed"),
-          like(patientVisits.visitDate, `${report.month}%`)
+          ...dateConditions
         )
       );
-    const uniqueVisits = new Set(treatmentLogs.map(v => `${v.visitDate}_${v.visitTime}_${v.patientId}`));
+    const uniqueVisits = new Set(treatmentLogs.map(v => `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`));
     const actualTreatments = uniqueVisits.size;
 
     const actualTakeHomePay = report.baseSalary + actualCommissions + report.allowances + report.bonuses - report.deductions;

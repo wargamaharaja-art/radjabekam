@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { therapists, therapistMonthlyReports, patientVisits, attendance, therapistCommissions } from "@/lib/db/schema";
+import { therapists, therapistMonthlyReports, patientVisits, attendance, therapistCommissions, patients } from "@/lib/db/schema";
 import { eq, and, like, gte, lte } from "drizzle-orm";
 import { getSession, getActiveBranchFilter } from "@/lib/auth";
 
@@ -81,12 +81,17 @@ export async function GET(request: Request) {
 
     const allMonthVisits = await db
       .select({ 
+        id: patientVisits.id,
         therapistId: patientVisits.therapistId,
+        commTherapistId: therapistCommissions.therapistId,
         visitDate: patientVisits.visitDate,
         visitTime: patientVisits.visitTime,
         patientId: patientVisits.patientId,
+        patientName: patients.name,
       })
       .from(patientVisits)
+      .leftJoin(patients, eq(patientVisits.patientId, patients.id))
+      .leftJoin(therapistCommissions, eq(patientVisits.id, therapistCommissions.visitId))
       .where(
         and(
           eq(patientVisits.status, "completed"),
@@ -103,8 +108,8 @@ export async function GET(request: Request) {
           .filter(c => c.therapistId === t.id)
           .reduce((sum, c) => sum + c.amount, 0);
           
-        const tVisits = allMonthVisits.filter(v => v.therapistId === t.id);
-        const uniqueVisits = new Set(tVisits.map(v => `${v.visitDate}_${v.visitTime}_${v.patientId}`));
+        const tVisits = allMonthVisits.filter(v => v.therapistId === t.id || v.commTherapistId === t.id);
+        const uniqueVisits = new Set(tVisits.map(v => `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`));
         const actualTreatments = uniqueVisits.size;
 
         const saved = savedReportsMap.get(t.id);
