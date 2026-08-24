@@ -4,6 +4,10 @@ import { therapists, patientVisits, therapistCommissions, services, therapistSer
 import { eq, desc, and, like } from "drizzle-orm";
 import { getSession, getActiveBranchFilter } from "@/lib/auth";
 import { calculateTherapistCommission } from "@/lib/commission";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const session = await getSession();

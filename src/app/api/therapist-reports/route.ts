@@ -3,6 +3,9 @@ import { therapists, therapistMonthlyReports, patientVisits, attendance, therapi
 import { eq, and, like, gte, lte } from "drizzle-orm";
 import { getSession, getActiveBranchFilter } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request: Request) {
   try {
     const session = await getSession();
@@ -180,7 +183,13 @@ export async function GET(request: Request) {
     );
 
 
-    return Response.json({ data });
+    return Response.json({ data }, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+      }
+    });
   } catch (error) {
     console.error("GET /api/therapist-reports error:", error);
     return Response.json({ error: "Gagal mengambil data laporan" }, { status: 500 });

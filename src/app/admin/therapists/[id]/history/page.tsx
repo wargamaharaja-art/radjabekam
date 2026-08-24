@@ -43,8 +43,10 @@ export default function TherapistHistoryPage({ params }: { params: Promise<{ id:
     const fetchHistory = async () => {
       setLoading(true);
       setError("");
-      try {
-        const res = await fetch(`/api/therapists/${therapistId}/history?startDate=${startDate}&endDate=${endDate}`);
+        const res = await fetch(`/api/therapists/${therapistId}/history?startDate=${startDate}&endDate=${endDate}&_t=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" }
+        });
         if (!res.ok) {
           const errData = await res.json();
           throw new Error(errData.error || "Gagal mengambil riwayat pasien");

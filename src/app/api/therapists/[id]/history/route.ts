@@ -4,6 +4,10 @@ import { therapists, patientVisits, patients, services, therapistCommissions } f
 import { eq, and, gte, lte, or, inArray } from "drizzle-orm";
 import { getSession, checkBranchAccess, getActiveBranchFilter } from "@/lib/auth";
 import { calculateTherapistCommission } from "@/lib/commission";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -223,6 +227,12 @@ export async function GET(
         totalCommissions,
       },
       data: combinedVisits,
+    }, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+      }
     });
   } catch (error) {
     console.error("GET /api/therapists/[id]/history error:", error);

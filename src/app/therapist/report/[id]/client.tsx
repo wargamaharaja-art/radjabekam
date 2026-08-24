@@ -47,7 +47,10 @@ export default function TherapistReportClientPage({ reportId }: { reportId: stri
   useEffect(() => {
     async function loadMeta() {
       try {
-        const res = await fetch(`/api/therapist-reports/${reportId}`);
+        const res = await fetch(`/api/therapist-reports/${reportId}?_t=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" }
+        });
         if (res.ok) {
           const json = await res.json();
           setMeta(json);
@@ -75,9 +78,10 @@ export default function TherapistReportClientPage({ reportId }: { reportId: stri
     setError(null);
 
     try {
-      const res = await fetch(`/api/therapist-reports/${reportId}/verify`, {
+      const res = await fetch(`/api/therapist-reports/${reportId}/verify?_t=${Date.now()}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
         body: JSON.stringify({ pin }),
       });
 

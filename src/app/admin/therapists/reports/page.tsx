@@ -93,9 +93,15 @@ export default function TherapistReportsPage() {
             ? `/api/therapist-reports?month=${targetMonth}`
             : `/api/therapist-reports?startDate=${start}&endDate=${end}`;
 
+        const separator = url.includes("?") ? "&" : "?";
+        const urlWithTimestamp = `${url}${separator}_t=${Date.now()}`;
+
         const [res, sessionRes] = await Promise.all([
-          fetch(url),
-          fetch("/api/auth/session"),
+          fetch(urlWithTimestamp, {
+            cache: "no-store",
+            headers: { "Cache-Control": "no-cache" }
+          }),
+          fetch("/api/auth/session", { cache: "no-store" }),
         ]);
         if (res.ok) {
           const json = await res.json();
