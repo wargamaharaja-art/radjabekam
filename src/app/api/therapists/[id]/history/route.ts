@@ -138,6 +138,7 @@ export async function GET(
           commissionAmount: 0,
           commissionStatus: null,
           visitedIds: new Set(),
+          visitedCommVisitIds: new Set(),
           dbCommissionIds: new Set(),
         });
       }
@@ -155,7 +156,10 @@ export async function GET(
       }
       
       if (v.commissions && v.commissions.length > 0) {
-        for (const c of v.commissions) {
+        // Take the latest/first valid commission for this visitId to prevent duplicate counting
+        if (!existing.visitedCommVisitIds.has(v.id)) {
+          existing.visitedCommVisitIds.add(v.id);
+          const c = v.commissions[0];
           if (!existing.dbCommissionIds.has(c.id)) {
             existing.dbCommissionIds.add(c.id);
             existing.commissionAmount += c.amount;
@@ -167,21 +171,25 @@ export async function GET(
           }
         }
       } else if (v.paymentStatus !== "PAID" && v.mainTherapistId === id) {
-        const dynamicComm = await calculateTherapistCommission(
-          db,
-          id,
-          v.serviceId,
-          1
-        );
-        existing.commissionAmount += dynamicComm;
-        if (!existing.commissionStatus) {
-          existing.commissionStatus = "PENDING";
+        if (!existing.visitedCommVisitIds.has(v.id)) {
+          existing.visitedCommVisitIds.add(v.id);
+          const dynamicComm = await calculateTherapistCommission(
+            db,
+            id,
+            v.serviceId,
+            1
+          );
+          existing.commissionAmount += dynamicComm;
+          if (!existing.commissionStatus) {
+            existing.commissionStatus = "PENDING";
+          }
         }
       }
     }
     
     for (const group of groupedVisits.values()) {
       delete group.visitedIds;
+      delete group.visitedCommVisitIds;
       delete group.dbCommissionIds;
       delete group.commissions;
     }

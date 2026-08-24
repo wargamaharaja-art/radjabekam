@@ -539,6 +539,11 @@ export async function POST(request: Request) {
               item.qty || 1,
             );
 
+            // Ensure no duplicate or stale commissions exist for this visitId
+            await tx
+              .delete(therapistCommissions)
+              .where(eq(therapistCommissions.visitId, targetVisitId));
+
             if (commissionAmount > 0) {
               totalCommission += commissionAmount;
               commissionDetails.push(item.name || serviceId);
