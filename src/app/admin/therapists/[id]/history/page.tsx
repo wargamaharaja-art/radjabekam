@@ -42,7 +42,7 @@ export default function TherapistHistoryPage({ params }: { params: Promise<{ id:
   useEffect(() => {
     const fetchHistory = async () => {
       setLoading(true);
-      setError("");
+      try {
         const res = await fetch(`/api/therapists/${therapistId}/history?startDate=${startDate}&endDate=${endDate}&_t=${Date.now()}`, {
           cache: "no-store",
           headers: { "Cache-Control": "no-cache" }
