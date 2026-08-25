@@ -223,42 +223,96 @@ export async function POST() {
 
       if (dateConditions.length === 0) continue;
 
-      const comms = await db
-        .select({ amount: therapistCommissions.amount })
-        .from(therapistCommissions)
-        .innerJoin(
-          patientVisits,
-          eq(therapistCommissions.visitId, patientVisits.id),
-        )
-        .where(
-          and(
-            eq(therapistCommissions.therapistId, r.therapistId),
-            ...dateConditions
-          ),
-        );
-
-      const reportTotalComm = comms.reduce((s, c) => s + (c.amount || 0), 0);
-
-      const visits = await db
+      const reportVisits = await db
         .select({
           id: patientVisits.id,
+          therapistId: patientVisits.therapistId,
           visitDate: patientVisits.visitDate,
           visitTime: patientVisits.visitTime,
           patientId: patientVisits.patientId,
           patientName: patients.name,
+          serviceId: patientVisits.serviceId,
+          status: patientVisits.status,
         })
         .from(patientVisits)
         .leftJoin(patients, eq(patientVisits.patientId, patients.id))
-        .where(
-          and(
-            eq(patientVisits.therapistId, r.therapistId),
-            eq(patientVisits.status, "completed"),
-            ...dateConditions
-          ),
-        );
+        .where(and(...dateConditions));
 
-      const uniqueVisits = new Set(visits.map(v => `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`));
-      const totalTreatments = uniqueVisits.size;
+      const visitIds = reportVisits.map((v) => v.id);
+
+      let comms: any[] = [];
+      if (visitIds.length > 0) {
+        comms = await db
+          .select()
+          .from(therapistCommissions)
+          .where(
+            and(
+              inArray(therapistCommissions.visitId, visitIds),
+              eq(therapistCommissions.therapistId, r.therapistId)
+            )
+          );
+      }
+
+      const commsByVisitId = new Map<string, any[]>();
+      for (const c of comms) {
+        if (!commsByVisitId.has(c.visitId)) {
+          commsByVisitId.set(c.visitId, []);
+        }
+        commsByVisitId.get(c.visitId)!.push(c);
+      }
+
+      const tVisits = reportVisits.filter(
+        (v) => v.therapistId === r.therapistId || commsByVisitId.has(v.id)
+      );
+
+      const groupedVisits = new Map<string, any>();
+      for (const v of tVisits) {
+        const key = `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`;
+        if (!groupedVisits.has(key)) {
+          groupedVisits.set(key, {
+            status: v.status,
+            commissionAmount: 0,
+            visitedIds: new Set(),
+            visitedCommVisitIds: new Set(),
+            dbCommissionIds: new Set(),
+          });
+        }
+        const grp = groupedVisits.get(key)!;
+        if (!grp.visitedIds.has(v.id)) {
+          grp.visitedIds.add(v.id);
+          if (v.status === "in_progress") grp.status = "in_progress";
+          else if (v.status === "completed" && grp.status !== "in_progress") grp.status = "completed";
+        }
+
+        const visitComms = commsByVisitId.get(v.id) || [];
+        if (visitComms.length > 0) {
+          if (!grp.visitedCommVisitIds.has(v.id)) {
+            grp.visitedCommVisitIds.add(v.id);
+            const c = visitComms[0];
+            if (!grp.dbCommissionIds.has(c.id)) {
+              grp.dbCommissionIds.add(c.id);
+              grp.commissionAmount += c.amount;
+            }
+          }
+        } else if (v.therapistId === r.therapistId && v.serviceId && v.status === "completed") {
+          if (!grp.visitedCommVisitIds.has(v.id)) {
+            grp.visitedCommVisitIds.add(v.id);
+            const svc = serviceMap.get(v.serviceId);
+            const dynamicComm = calculateCommissionAmount({
+              serviceGlobalCommission: svc ? svc.globalCommission : 0,
+              servicePrice: svc ? svc.price : 0,
+              qty: 1,
+            });
+            grp.commissionAmount += dynamicComm;
+          }
+        }
+      }
+
+      const combinedVisits = Array.from(groupedVisits.values());
+      const totalTreatments = combinedVisits.filter((v) => v.status === "completed").length;
+      const reportTotalComm = combinedVisits
+        .filter((v) => v.status === "completed")
+        .reduce((s, v) => s + (v.commissionAmount || 0), 0);
 
       const newThp =
         (r.baseSalary || 0) +

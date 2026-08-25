@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
-import { useRouter } from "next/navigation";
-import { Calendar, Users, DollarSign, Clock, ArrowLeft, Activity, FileText, CheckCircle, Clock3 } from "lucide-react";
+import { useState, useEffect, use, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { Calendar, Users, DollarSign, Clock, ArrowLeft, Activity, FileText, CheckCircle, Clock3, Award, ExternalLink } from "lucide-react";
 import PageHeader from "@/components/layout/PageHeader";
 
 type HistoryData = {
@@ -17,22 +18,39 @@ type HistoryData = {
   commissionStatus: string;
 };
 
-export default function TherapistHistoryPage({ params }: { params: Promise<{ id: string }> }) {
+function TherapistHistoryContent({ therapistId }: { therapistId: string }) {
   const router = useRouter();
-  const unwrappedParams = use(params);
-  const therapistId = unwrappedParams.id;
-  
+  const searchParams = useSearchParams();
+
+  const paramStartDate = searchParams?.get("startDate");
+  const paramEndDate = searchParams?.get("endDate");
+  const paramMonth = searchParams?.get("month");
+  const paramMode = searchParams?.get("filterMode") as "month" | "dateRange" | null;
+
+  const [filterMode, setFilterMode] = useState<"month" | "dateRange">(() => {
+    if (paramMode) return paramMode;
+    if (paramStartDate && paramEndDate) return "dateRange";
+    return "month";
+  });
+
+  const [month, setMonth] = useState(() => {
+    if (paramMonth) return paramMonth;
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+
   const [startDate, setStartDate] = useState(() => {
+    if (paramStartDate) return paramStartDate;
     const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split("T")[0];
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
   });
-  
+
   const [endDate, setEndDate] = useState(() => {
+    if (paramEndDate) return paramEndDate;
     const d = new Date();
-    return d.toISOString().split("T")[0];
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()).padStart(2, "0")}`;
   });
-  
+
   const [data, setData] = useState<HistoryData[]>([]);
   const [therapist, setTherapist] = useState<any>(null);
   const [summary, setSummary] = useState({ totalTreatments: 0, totalCommissions: 0 });
@@ -42,8 +60,14 @@ export default function TherapistHistoryPage({ params }: { params: Promise<{ id:
   useEffect(() => {
     const fetchHistory = async () => {
       setLoading(true);
+      setError("");
       try {
-        const res = await fetch(`/api/therapists/${therapistId}/history?startDate=${startDate}&endDate=${endDate}&_t=${Date.now()}`, {
+        const query =
+          filterMode === "month"
+            ? `month=${month}`
+            : `startDate=${startDate}&endDate=${endDate}`;
+
+        const res = await fetch(`/api/therapists/${therapistId}/history?${query}&_t=${Date.now()}`, {
           cache: "no-store",
           headers: { "Cache-Control": "no-cache" }
         });
@@ -51,7 +75,7 @@ export default function TherapistHistoryPage({ params }: { params: Promise<{ id:
           const errData = await res.json();
           throw new Error(errData.error || "Gagal mengambil riwayat pasien");
         }
-        
+
         const json = await res.json();
         setData(json.data);
         setTherapist(json.therapist);
@@ -65,7 +89,7 @@ export default function TherapistHistoryPage({ params }: { params: Promise<{ id:
     };
 
     fetchHistory();
-  }, [therapistId, startDate, endDate]);
+  }, [therapistId, startDate, endDate, month, filterMode]);
 
   const formatRupiah = (amount: number) => {
     return new Intl.NumberFormat("id-ID", {
@@ -89,50 +113,95 @@ export default function TherapistHistoryPage({ params }: { params: Promise<{ id:
   };
 
   const getPeriodReadable = () => {
+    if (filterMode === "month") {
+      const [y, m] = month.split("-");
+      return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+    }
     if (!startDate || !endDate) return "";
-    const start = new Date(startDate).toLocaleDateString("id-ID", { day: 'numeric', month: "short", year: "numeric" });
-    const end = new Date(endDate).toLocaleDateString("id-ID", { day: 'numeric', month: "short", year: "numeric" });
+    const start = new Date(startDate).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    const end = new Date(endDate).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
     return start === end ? start : `${start} - ${end}`;
   };
+
+  const currentReportLink = `/admin/therapists/reports?filterMode=${filterMode}&startDate=${startDate}&endDate=${endDate}&month=${month}`;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 bg-gray-50/50 min-h-screen">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Back Button */}
-        <button 
-          onClick={() => router.back()} 
-          className="flex items-center gap-2 text-gray-500 hover:text-teal-600 transition-colors font-medium text-sm mb-6 bg-white px-4 py-2 rounded-xl border border-gray-200 shadow-sm w-fit"
-        >
-          <ArrowLeft className="w-4 h-4" /> Kembali
-        </button>
+        {/* Navigation & Action Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <button 
+            onClick={() => router.back()} 
+            className="flex items-center gap-2 text-gray-600 hover:text-blue-600 transition-colors font-semibold text-sm bg-white px-4 py-2 rounded-xl border border-gray-200 shadow-sm w-fit"
+          >
+            <ArrowLeft className="w-4 h-4" /> Kembali
+          </button>
+
+          <Link
+            href={currentReportLink}
+            className="flex items-center gap-2 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors font-bold text-sm px-4 py-2 rounded-xl border border-indigo-200 shadow-sm"
+          >
+            <Award className="w-4 h-4 text-indigo-600" /> Buka Rapor & Slip Gaji Periode Ini
+          </Link>
+        </div>
 
         <PageHeader 
           title="Riwayat Penanganan Pasien"
           description={therapist ? `Transparansi tindakan & komisi untuk Terapis: ${therapist.name}` : "Memuat detail terapis..."}
           icon={FileText}
           rightContent={
-            <div className="flex items-center gap-2 bg-white border border-gray-200 shadow-sm rounded-xl px-2 py-1.5 focus-within:ring-2 focus-within:ring-teal-500/20 transition-all">
-              <Calendar className="w-4 h-4 text-gray-400 ml-2" />
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="bg-transparent border-none focus:outline-none text-gray-900 font-medium text-sm cursor-pointer"
-              />
-              <span className="text-gray-400 font-bold px-1">-</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="bg-transparent border-none focus:outline-none text-gray-900 font-medium text-sm cursor-pointer"
-              />
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              {/* Filter Mode Selector */}
+              <div className="flex items-center gap-1 bg-white rounded-xl border border-gray-200 p-1 shadow-sm">
+                <button
+                  onClick={() => setFilterMode("month")}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${filterMode === "month" ? "bg-blue-50 text-blue-700 font-bold" : "text-gray-500 hover:text-gray-700"}`}
+                >
+                  Per Bulan
+                </button>
+                <button
+                  onClick={() => setFilterMode("dateRange")}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${filterMode === "dateRange" ? "bg-blue-50 text-blue-700 font-bold" : "text-gray-500 hover:text-gray-700"}`}
+                >
+                  Rentang Tanggal
+                </button>
+              </div>
+
+              {filterMode === "month" ? (
+                <div className="relative bg-white rounded-xl border border-gray-200 shadow-sm px-3 py-1.5 flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-gray-400 pointer-events-none" />
+                  <input
+                    type="month"
+                    value={month}
+                    onChange={(e) => setMonth(e.target.value)}
+                    className="bg-transparent border-none focus:outline-none text-gray-900 font-semibold text-sm cursor-pointer"
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 bg-white border border-gray-200 shadow-sm rounded-xl px-2 py-1.5 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+                  <Calendar className="w-4 h-4 text-gray-400 ml-2" />
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="bg-transparent border-none focus:outline-none text-gray-900 font-medium text-sm cursor-pointer"
+                  />
+                  <span className="text-gray-400 font-bold px-1">-</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="bg-transparent border-none focus:outline-none text-gray-900 font-medium text-sm cursor-pointer"
+                  />
+                </div>
+              )}
             </div>
           }
         />
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl mb-6">
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl mb-6 font-semibold">
             {error}
           </div>
         )}
@@ -147,17 +216,17 @@ export default function TherapistHistoryPage({ params }: { params: Promise<{ id:
                     <Users className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider">Total Pasien</h3>
+                    <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider">Total Pasien Selesai</h3>
                     <p className="text-xs font-medium text-gray-400">Periode {getPeriodReadable()}</p>
                   </div>
                 </div>
                 <div className="mt-2 relative z-10">
                   <span className="text-3xl font-black text-gray-900">{summary.totalTreatments}</span>
-                  <span className="text-gray-500 ml-2 font-medium">Orang</span>
+                  <span className="text-gray-500 ml-2 font-medium">Pasien / Treatment</span>
                 </div>
               </div>
 
-              <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-5 rounded-2xl shadow-[0_4px_20px_-4px_rgba(59,130,246,0.4)] flex flex-col justify-between text-white relative overflow-hidden group">
+              <div className="bg-gradient-to-br from-blue-600 to-indigo-600 p-5 rounded-2xl shadow-[0_4px_20px_-4px_rgba(59,130,246,0.4)] flex flex-col justify-between text-white relative overflow-hidden group">
                 <div className="absolute right-0 bottom-0 w-32 h-32 bg-white/10 rounded-full -mr-10 -mb-10 group-hover:scale-125 transition-transform duration-500 ease-out z-0"></div>
                 <div className="absolute left-10 top-2 w-16 h-16 bg-white/10 rounded-full group-hover:-translate-y-4 transition-transform duration-500 ease-out z-0"></div>
                 
@@ -166,8 +235,8 @@ export default function TherapistHistoryPage({ params }: { params: Promise<{ id:
                     <DollarSign className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-blue-50 text-xs font-bold uppercase tracking-wider">Estimasi Komisi</h3>
-                    <p className="text-xs font-medium text-blue-100/80">Belum termasuk gaji pokok</p>
+                    <h3 className="text-blue-100 text-xs font-bold uppercase tracking-wider">Total Komisi Tindakan</h3>
+                    <p className="text-xs font-medium text-blue-100/80">Tersinkronisasi otomatis dengan slip gaji</p>
                   </div>
                 </div>
                 <div className="mt-2 relative z-10">
@@ -261,5 +330,20 @@ export default function TherapistHistoryPage({ params }: { params: Promise<{ id:
         )}
       </div>
     </div>
+  );
+}
+
+export default function TherapistHistoryPage({ params }: { params: Promise<{ id: string }> }) {
+  const unwrappedParams = use(params);
+  return (
+    <Suspense
+      fallback={
+        <div className="p-8 flex items-center justify-center min-h-screen">
+          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      }
+    >
+      <TherapistHistoryContent therapistId={unwrappedParams.id} />
+    </Suspense>
   );
 }

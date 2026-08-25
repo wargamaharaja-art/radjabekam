@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Calendar,
   Clock,
@@ -258,7 +259,7 @@ export default function TherapistReportsPage() {
     doc.text(`Total Penanganan: ${report.totalTreatments} Pasien`, 14, 59);
     doc.text(`Kehadiran (Hadir/Telat/Absen): ${report.attendancePresent} / ${report.attendanceLate} / ${report.attendanceAbsent}`, 14, 66);
 
-    const tableData = [
+    const tableData: any = [
       [{ content: "Keterangan", styles: { fontStyle: "bold", fillColor: [240, 240, 240] } }, { content: "Nominal", styles: { fontStyle: "bold", fillColor: [240, 240, 240], halign: "right" } }],
       ["Gaji Pokok", formatRupiah(report.baseSalary)],
       ["Komisi Tindakan", formatRupiah(report.commissions)],
@@ -676,10 +677,16 @@ export default function TherapistReportsPage() {
                       className="hover:bg-blue-50/10 transition-colors"
                     >
                       <td className="px-6 py-4 font-bold text-gray-900">
-                        <div>{r.therapistName}</div>
-                        <div className="text-[10px] text-gray-400 mt-0.5 uppercase tracking-wide">
-                          ID: {r.therapistId?.substring(0, 8) || "N/A"}...
-                        </div>
+                        <Link
+                          href={`/admin/therapists/${r.therapistId}/history?filterMode=${filterMode}&startDate=${filterMode === "month" ? `${month}-01` : startDate}&endDate=${filterMode === "month" ? `${month}-${new Date(parseInt(month.split("-")[0]), parseInt(month.split("-")[1]), 0).getDate().toString().padStart(2, "0")}` : endDate}&month=${month}`}
+                          className="hover:text-blue-600 transition-colors inline-block"
+                          title="Lihat Riwayat Pasien Terapis"
+                        >
+                          <div>{r.therapistName}</div>
+                          <div className="text-[10px] text-gray-400 mt-0.5 uppercase tracking-wide">
+                            ID: {r.therapistId?.substring(0, 8) || "N/A"}...
+                          </div>
+                        </Link>
                       </td>
                       <td className="px-6 py-4 text-center">
                         {r.isSaved ? (
@@ -693,7 +700,13 @@ export default function TherapistReportsPage() {
                         )}
                       </td>
                       <td className="px-6 py-4 text-center font-bold text-gray-800">
-                        {r.totalTreatments} Pasien
+                        <Link
+                          href={`/admin/therapists/${r.therapistId}/history?filterMode=${filterMode}&startDate=${filterMode === "month" ? `${month}-01` : startDate}&endDate=${filterMode === "month" ? `${month}-${new Date(parseInt(month.split("-")[0]), parseInt(month.split("-")[1]), 0).getDate().toString().padStart(2, "0")}` : endDate}&month=${month}`}
+                          className="text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1 font-extrabold"
+                          title="Klik untuk rincian riwayat pasien"
+                        >
+                          {r.totalTreatments} Pasien
+                        </Link>
                       </td>
                       <td className="px-6 py-4 text-center font-semibold text-sm text-gray-600">
                         <span className="text-blue-600 font-bold">
@@ -719,6 +732,15 @@ export default function TherapistReportsPage() {
                       </td>
                       <td className="px-6 py-4 text-center">
                         <div className="inline-flex items-center gap-2">
+                          <Link
+                            href={`/admin/therapists/${r.therapistId}/history?filterMode=${filterMode}&startDate=${filterMode === "month" ? `${month}-01` : startDate}&endDate=${filterMode === "month" ? `${month}-${new Date(parseInt(month.split("-")[0]), parseInt(month.split("-")[1]), 0).getDate().toString().padStart(2, "0")}` : endDate}&month=${month}`}
+                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 border border-emerald-200"
+                            title="Buka Riwayat Penanganan Pasien"
+                          >
+                            <Activity className="w-3.5 h-3.5" />
+                            Riwayat
+                          </Link>
+
                           <button
                             onClick={() => handleEditClick(r)}
                             className="bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-blue-100"

@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
-import { therapistMonthlyReports, therapists, branches, therapistCommissions, patientVisits, patients } from "@/lib/db/schema";
-import { eq, and, or, like, gte, lte } from "drizzle-orm";
+import { therapistMonthlyReports, therapists, branches, therapistCommissions, patientVisits, patients, services } from "@/lib/db/schema";
+import { eq, and, or, like, gte, lte, inArray } from "drizzle-orm";
+import { calculateTherapistCommission } from "@/lib/commission";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -83,7 +84,7 @@ export async function POST(
       return Response.json({ error: "PIN keamanan salah. Silakan coba lagi atau hubungi HR." }, { status: 401 });
     }
 
-    // Hitung ulang komisi & treatment aktual dari DB (real-time, bukan stale)
+    // Hitung ulang komisi & treatment aktual dari DB secara tersinkronisasi
     const dateConditions = [];
     if (report.startDate && report.endDate) {
       dateConditions.push(
@@ -91,44 +92,130 @@ export async function POST(
         lte(patientVisits.visitDate, report.endDate)
       );
     } else if (report.month) {
-      dateConditions.push(like(patientVisits.visitDate, `${report.month}%`));
+      const [year, m] = report.month.split("-");
+      const monthStart = `${year}-${m}-01`;
+      const lastDay = new Date(parseInt(year), parseInt(m), 0).getDate();
+      const monthEnd = `${year}-${m}-${String(lastDay).padStart(2, "0")}`;
+      dateConditions.push(
+        gte(patientVisits.visitDate, monthStart),
+        lte(patientVisits.visitDate, monthEnd)
+      );
     }
 
-    const commissionLogs = await db
-      .select({ amount: therapistCommissions.amount })
-      .from(therapistCommissions)
-      .innerJoin(patientVisits, eq(therapistCommissions.visitId, patientVisits.id))
-      .where(
-        and(
-          eq(therapistCommissions.therapistId, report.therapistId),
-          ...dateConditions
-        )
-      );
-    const actualCommissions = commissionLogs.reduce((sum, c) => sum + c.amount, 0);
-
-    const treatmentLogs = await db
-      .select({ 
+    const allVisits = await db
+      .select({
         id: patientVisits.id,
+        therapistId: patientVisits.therapistId,
         visitDate: patientVisits.visitDate,
         visitTime: patientVisits.visitTime,
         patientId: patientVisits.patientId,
         patientName: patients.name,
+        serviceId: patientVisits.serviceId,
+        servicePrice: services.price,
+        serviceName: services.name,
+        status: patientVisits.status,
+        paymentStatus: patientVisits.paymentStatus,
       })
       .from(patientVisits)
       .leftJoin(patients, eq(patientVisits.patientId, patients.id))
-      .leftJoin(therapistCommissions, eq(patientVisits.id, therapistCommissions.visitId))
-      .where(
-        and(
-          or(
-            eq(patientVisits.therapistId, report.therapistId),
+      .leftJoin(services, eq(patientVisits.serviceId, services.id))
+      .where(and(...dateConditions));
+
+    const visitIds = allVisits.map((v) => v.id);
+
+    let comms: any[] = [];
+    if (visitIds.length > 0) {
+      comms = await db
+        .select()
+        .from(therapistCommissions)
+        .where(
+          and(
+            inArray(therapistCommissions.visitId, visitIds),
             eq(therapistCommissions.therapistId, report.therapistId)
-          ),
-          eq(patientVisits.status, "completed"),
-          ...dateConditions
-        )
-      );
-    const uniqueVisits = new Set(treatmentLogs.map(v => `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`));
-    const actualTreatments = uniqueVisits.size;
+          )
+        );
+    }
+
+    const commsByVisitId = new Map<string, any[]>();
+    for (const c of comms) {
+      if (!commsByVisitId.has(c.visitId)) {
+        commsByVisitId.set(c.visitId, []);
+      }
+      commsByVisitId.get(c.visitId)!.push(c);
+    }
+
+    // Filter kunjungan terapis ini
+    const tVisits = allVisits.filter(
+      (v) => v.therapistId === report.therapistId || commsByVisitId.has(v.id)
+    );
+
+    const groupedVisits = new Map<string, any>();
+    for (const v of tVisits) {
+      const key = `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`;
+      if (!groupedVisits.has(key)) {
+        groupedVisits.set(key, {
+          id: v.id,
+          visitDate: v.visitDate,
+          visitTime: v.visitTime,
+          patientName: v.patientName,
+          serviceName: "",
+          servicePrice: 0,
+          status: v.status,
+          commissionAmount: 0,
+          commissionStatus: null,
+          visitedIds: new Set(),
+          visitedCommVisitIds: new Set(),
+          dbCommissionIds: new Set(),
+        });
+      }
+      const grp = groupedVisits.get(key)!;
+      if (!grp.visitedIds.has(v.id)) {
+        grp.serviceName += grp.serviceName ? `, ${v.serviceName}` : (v.serviceName || "");
+        grp.servicePrice += (v.servicePrice || 0);
+        grp.visitedIds.add(v.id);
+        if (v.status === "in_progress") grp.status = "in_progress";
+        else if (v.status === "completed" && grp.status !== "in_progress") grp.status = "completed";
+      }
+
+      const visitComms = commsByVisitId.get(v.id) || [];
+      if (visitComms.length > 0) {
+        if (!grp.visitedCommVisitIds.has(v.id)) {
+          grp.visitedCommVisitIds.add(v.id);
+          const c = visitComms[0];
+          if (!grp.dbCommissionIds.has(c.id)) {
+            grp.dbCommissionIds.add(c.id);
+            grp.commissionAmount += c.amount;
+            if (c.status === "PAID") grp.commissionStatus = "PAID";
+            else if (!grp.commissionStatus) grp.commissionStatus = c.status;
+          }
+        }
+      } else if (v.therapistId === report.therapistId && v.serviceId && v.status === "completed") {
+        if (!grp.visitedCommVisitIds.has(v.id)) {
+          grp.visitedCommVisitIds.add(v.id);
+          const dynamicComm = await calculateTherapistCommission(db, report.therapistId, v.serviceId, 1);
+          grp.commissionAmount += dynamicComm;
+          if (!grp.commissionStatus) grp.commissionStatus = v.paymentStatus === "PAID" ? "PAID" : "PENDING";
+        }
+      }
+    }
+
+    for (const group of groupedVisits.values()) {
+      delete group.visitedIds;
+      delete group.visitedCommVisitIds;
+      delete group.dbCommissionIds;
+    }
+
+    const combinedVisits = Array.from(groupedVisits.values());
+    // Sort descending by date and time
+    combinedVisits.sort((a, b) => {
+      const dateA = new Date(`${a.visitDate}T${(a.visitTime || '00:00').replace('.', ':')}`);
+      const dateB = new Date(`${b.visitDate}T${(b.visitTime || '00:00').replace('.', ':')}`);
+      return dateB.getTime() - dateA.getTime();
+    });
+
+    const completedVisits = combinedVisits.filter((v) => v.status === "completed");
+    const actualTreatments = completedVisits.length;
+    const actualCommissions = completedVisits.reduce((sum, v) => sum + (v.commissionAmount || 0), 0);
 
     const actualTakeHomePay = report.baseSalary + actualCommissions + report.allowances + report.bonuses - report.deductions;
 
@@ -142,6 +229,7 @@ export async function POST(
         commissions: actualCommissions,
         totalTreatments: actualTreatments,
         takeHomePay: actualTakeHomePay,
+        treatmentList: completedVisits,
       },
     });
   } catch (error) {

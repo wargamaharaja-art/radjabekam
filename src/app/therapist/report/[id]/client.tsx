@@ -25,6 +25,16 @@ type ReportData = {
   therapistName: string;
   specialization: string;
   branchName: string | null;
+  treatmentList?: {
+    id: string;
+    visitDate: string;
+    visitTime: string;
+    patientName?: string;
+    serviceName?: string;
+    servicePrice?: number;
+    commissionAmount?: number;
+    commissionStatus?: string;
+  }[];
 };
 
 type Metadata = {
@@ -41,6 +51,7 @@ export default function TherapistReportClientPage({ reportId }: { reportId: stri
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
+  const [showTreatments, setShowTreatments] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch welcome metadata on load
@@ -110,6 +121,7 @@ export default function TherapistReportClientPage({ reportId }: { reportId: stri
   };
 
   const getMonthReadable = (monthCode: string) => {
+    if (!monthCode) return "";
     const [y, m] = monthCode.split("-");
     return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
   };
@@ -213,9 +225,9 @@ export default function TherapistReportClientPage({ reportId }: { reportId: stri
   // STEP 2: Dashboard Report Screen
   if (authenticated && report) {
     // Math indicators
-    const hasCommissions = report.commissions > 0;
     const attendanceTotal = report.attendancePresent + report.attendanceLate + report.attendanceAbsent;
     const attendanceRate = attendanceTotal > 0 ? Math.round((report.attendancePresent / attendanceTotal) * 100) : 100;
+    const treatments = report.treatmentList || [];
 
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8 relative overflow-hidden">
@@ -316,7 +328,7 @@ export default function TherapistReportClientPage({ reportId }: { reportId: stri
                     <span className="font-semibold text-white">{formatRupiah(report.baseSalary)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Total Komisi Tindakan</span>
+                    <span className="text-slate-400">Total Komisi Tindakan ({report.totalTreatments} Pasien)</span>
                     <span className="font-semibold text-emerald-400">+{formatRupiah(report.commissions)}</span>
                   </div>
                   {report.allowances > 0 && (
@@ -362,7 +374,61 @@ export default function TherapistReportClientPage({ reportId }: { reportId: stri
             </div>
           </div>
 
-          {/* Section 3: Managerial Evaluations */}
+          {/* Section 3: Transparent Treatment History */}
+          {treatments.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider pl-1 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-400" /> Transparansi Riwayat Penanganan ({treatments.length} Pasien)
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowTreatments(!showTreatments)}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 font-bold bg-indigo-500/10 border border-indigo-500/20 px-3 py-1.5 rounded-lg transition-all"
+                >
+                  {showTreatments ? "Sembunyikan Rincian ▲" : "Lihat Rincian Pasien ▼"}
+                </button>
+              </div>
+
+              {showTreatments && (
+                <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-850 rounded-3xl p-5 shadow-lg overflow-hidden animate-in fade-in duration-200">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="text-slate-400 border-b border-slate-800 pb-2 uppercase tracking-wider text-[10px]">
+                          <th className="py-2.5 px-3">Tanggal & Jam</th>
+                          <th className="py-2.5 px-3">Nama Pasien</th>
+                          <th className="py-2.5 px-3">Layanan</th>
+                          <th className="py-2.5 px-3 text-right">Komisi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {treatments.map((t, idx) => (
+                          <tr key={t.id || idx} className="hover:bg-slate-800/30 transition-colors">
+                            <td className="py-2.5 px-3 text-slate-300">
+                              <div>{new Date(t.visitDate).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}</div>
+                              <div className="text-[10px] text-slate-500">{t.visitTime}</div>
+                            </td>
+                            <td className="py-2.5 px-3 font-semibold text-white">
+                              {t.patientName || "Pasien"}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-300">
+                              {t.serviceName || "-"}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-bold text-emerald-400">
+                              +{formatRupiah(t.commissionAmount || 0)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Section 4: Managerial Evaluations */}
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider pl-1 flex items-center gap-2">
               <FileText className="w-4 h-4 text-purple-400" /> Kritik, Saran & Evaluasi Manajemen
@@ -405,7 +471,7 @@ export default function TherapistReportClientPage({ reportId }: { reportId: stri
 
           {/* Confidential Footer */}
           <div className="text-center text-slate-600 text-[10px] space-y-1 mt-10">
-            <p>Dokumen ini diterbitkan secara resmi & sah secara digital oleh Navara Reflexology.</p>
+            <p>Dokumen ini diterbitkan secara resmi & sah secara digital oleh Klinik Radja Bekam.</p>
             <p className="font-semibold text-slate-500">Dilarang menyebarluaskan rincian gaji ini kepada pihak ketiga.</p>
           </div>
 

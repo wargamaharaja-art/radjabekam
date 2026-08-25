@@ -68,15 +68,12 @@ async function runAudit() {
     const commissions = commMap.get(visit.id) || [];
     const financeTxs = txMap.get(visit.id) || [];
 
-    // Calculate expected commission
-    const overrideCommission = overMap.get(`${therapistId}-${serviceId}`)?.commissionAmount || null;
     const serviceGlobalCommission = svcMap.get(serviceId)?.globalCommission || 0;
-    const therapistCommissionRate = thMap.get(therapistId)?.commissionRate || 0;
+    const servicePrice = svcMap.get(serviceId)?.price || 0;
     
     const expectedCommission = calculateCommissionAmount({
-      overrideCommission,
       serviceGlobalCommission,
-      therapistCommissionRate,
+      servicePrice,
       qty: 1
     });
 

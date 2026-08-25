@@ -1,7 +1,8 @@
 import { db } from "@/lib/db";
-import { therapists, therapistMonthlyReports, patientVisits, attendance, therapistCommissions, patients } from "@/lib/db/schema";
-import { eq, and, like, gte, lte } from "drizzle-orm";
+import { therapists, therapistMonthlyReports, patientVisits, attendance, therapistCommissions, patients, services } from "@/lib/db/schema";
+import { eq, and, like, gte, lte, inArray } from "drizzle-orm";
 import { getSession, getActiveBranchFilter } from "@/lib/auth";
+import { calculateTherapistCommission } from "@/lib/commission";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
       const [year, m] = month.split("-");
       filterStartDate = `${year}-${m}-01`;
       const lastDay = new Date(parseInt(year), parseInt(m), 0).getDate();
-      filterEndDate = `${year}-${m}-${lastDay}`;
+      filterEndDate = `${year}-${m}-${String(lastDay).padStart(2, "0")}`;
     }
 
     const branchFilter = await getActiveBranchFilter();
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
       .where(and(...therapistConditions));
 
     // 2. Fetch existing saved reports for this period
-    // If using month, match month. If custom, maybe match startDate and endDate.
+    // If using month, match month. If custom, match startDate and endDate.
     const reportConditions = [];
     if (month) {
       reportConditions.push(eq(therapistMonthlyReports.month, month));
@@ -67,53 +68,103 @@ export async function GET(request: Request) {
 
     const savedReportsMap = new Map(savedReports.map(r => [r.therapistId, r]));
 
-    // 3. Pre-fetch semua komisi dan kunjungan bulan ini sekali saja (efisien)
-    const allMonthCommissions = await db
-      .select({
-        therapistId: therapistCommissions.therapistId,
-        amount: therapistCommissions.amount,
-      })
-      .from(therapistCommissions)
-      .innerJoin(patientVisits, eq(therapistCommissions.visitId, patientVisits.id))
-      .where(
-        and(
-          gte(patientVisits.visitDate, filterStartDate as string),
-          lte(patientVisits.visitDate, filterEndDate as string)
-        )
-      );
+    // 3. Pre-fetch semua kunjungan dan komisi pada periode ini secara terpadu
+    const visitConditions: any[] = [
+      gte(patientVisits.visitDate, filterStartDate as string),
+      lte(patientVisits.visitDate, filterEndDate as string),
+    ];
+    if (branchFilter) {
+      visitConditions.push(eq(patientVisits.branchId, branchFilter));
+    }
 
-    const allMonthVisits = await db
-      .select({ 
+    const allVisits = await db
+      .select({
         id: patientVisits.id,
         therapistId: patientVisits.therapistId,
-        commTherapistId: therapistCommissions.therapistId,
         visitDate: patientVisits.visitDate,
         visitTime: patientVisits.visitTime,
         patientId: patientVisits.patientId,
         patientName: patients.name,
+        serviceId: patientVisits.serviceId,
+        servicePrice: services.price,
+        serviceName: services.name,
+        status: patientVisits.status,
+        paymentStatus: patientVisits.paymentStatus,
       })
       .from(patientVisits)
       .leftJoin(patients, eq(patientVisits.patientId, patients.id))
-      .leftJoin(therapistCommissions, eq(patientVisits.id, therapistCommissions.visitId))
-      .where(
-        and(
-          eq(patientVisits.status, "completed"),
-          gte(patientVisits.visitDate, filterStartDate as string),
-          lte(patientVisits.visitDate, filterEndDate as string)
-        )
-      );
+      .leftJoin(services, eq(patientVisits.serviceId, services.id))
+      .where(and(...visitConditions));
+
+    const visitIds = allVisits.map((v) => v.id);
+
+    let comms: any[] = [];
+    if (visitIds.length > 0) {
+      comms = await db
+        .select()
+        .from(therapistCommissions)
+        .where(inArray(therapistCommissions.visitId, visitIds));
+    }
+
+    const commsByVisitId = new Map<string, any[]>();
+    for (const c of comms) {
+      if (!commsByVisitId.has(c.visitId)) {
+        commsByVisitId.set(c.visitId, []);
+      }
+      commsByVisitId.get(c.visitId)!.push(c);
+    }
 
     // 4. For each therapist, map existing report or calculate defaults
     const data = await Promise.all(
       activeTherapists.map(async (t) => {
-        // Selalu hitung komisi & treatment aktual dari DB (tidak boleh stale)
-        const actualCommissions = allMonthCommissions
-          .filter(c => c.therapistId === t.id)
-          .reduce((sum, c) => sum + c.amount, 0);
-          
-        const tVisits = allMonthVisits.filter(v => v.therapistId === t.id || v.commTherapistId === t.id);
-        const uniqueVisits = new Set(tVisits.map(v => `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`));
-        const actualTreatments = uniqueVisits.size;
+        // Agregasi kunjungan dan komisi terapis dengan pengelompokan sesi pasien yang sama persis
+        const tVisits = allVisits.filter(
+          (v) => v.therapistId === t.id || (commsByVisitId.get(v.id) || []).some((c) => c.therapistId === t.id)
+        );
+
+        const groupedVisits = new Map<string, any>();
+        for (const v of tVisits) {
+          const key = `${v.visitDate}_${v.visitTime}_${v.patientName || v.patientId || v.id}`;
+          if (!groupedVisits.has(key)) {
+            groupedVisits.set(key, {
+              status: v.status,
+              commissionAmount: 0,
+              visitedIds: new Set(),
+              visitedCommVisitIds: new Set(),
+              dbCommissionIds: new Set(),
+            });
+          }
+          const grp = groupedVisits.get(key)!;
+          if (!grp.visitedIds.has(v.id)) {
+            grp.visitedIds.add(v.id);
+            if (v.status === "in_progress") grp.status = "in_progress";
+            else if (v.status === "completed" && grp.status !== "in_progress") grp.status = "completed";
+          }
+
+          const visitComms = (commsByVisitId.get(v.id) || []).filter((c) => c.therapistId === t.id);
+          if (visitComms.length > 0) {
+            if (!grp.visitedCommVisitIds.has(v.id)) {
+              grp.visitedCommVisitIds.add(v.id);
+              const c = visitComms[0];
+              if (!grp.dbCommissionIds.has(c.id)) {
+                grp.dbCommissionIds.add(c.id);
+                grp.commissionAmount += c.amount;
+              }
+            }
+          } else if (v.therapistId === t.id && v.serviceId && v.status === "completed") {
+            if (!grp.visitedCommVisitIds.has(v.id)) {
+              grp.visitedCommVisitIds.add(v.id);
+              const dynamicComm = await calculateTherapistCommission(db, t.id, v.serviceId, 1);
+              grp.commissionAmount += dynamicComm;
+            }
+          }
+        }
+
+        const combinedVisits = Array.from(groupedVisits.values());
+        const actualTreatments = combinedVisits.filter((v) => v.status === "completed").length;
+        const actualCommissions = combinedVisits
+          .filter((v) => v.status === "completed")
+          .reduce((sum, v) => sum + (v.commissionAmount || 0), 0);
 
         const saved = savedReportsMap.get(t.id);
         if (saved) {

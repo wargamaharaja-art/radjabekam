@@ -175,7 +175,7 @@ export async function GET(
             }
           }
         }
-      } else if (v.mainTherapistId === id && v.serviceId) {
+      } else if (v.mainTherapistId === id && v.serviceId && v.status === "completed") {
         if (!existing.visitedCommVisitIds.has(v.id)) {
           existing.visitedCommVisitIds.add(v.id);
           const dynamicComm = await calculateTherapistCommission(
@@ -209,7 +209,9 @@ export async function GET(
     });
 
     const totalTreatments = combinedVisits.filter(v => v.status === "completed").length;
-    const totalCommissions = combinedVisits.reduce((sum, v) => sum + (v.commissionAmount || 0), 0);
+    const totalCommissions = combinedVisits
+      .filter(v => v.status === "completed")
+      .reduce((sum, v) => sum + (v.commissionAmount || 0), 0);
 
     return NextResponse.json({
       therapist: {
