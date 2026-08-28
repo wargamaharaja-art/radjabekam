@@ -6,7 +6,8 @@ import {
   Plus, CalendarCheck, Search, User, Phone, MapPin, Activity, Store, 
   UserCheck, Calendar, Clock, FileText, X, ChevronDown, Users, TrendingUp, 
   Check, Receipt, Printer, MessageCircle, Link2, Download, AlertCircle, 
-  Minus, Trash2, Copy, Edit, CheckCircle2, Bell, Wallet, Save, Timer
+  Minus, Trash2, Copy, Edit, CheckCircle2, Bell, Wallet, Save, Timer,
+  FileSpreadsheet
 } from "lucide-react";
 import Pagination from "@/components/ui/Pagination";
 import PageHeader from "@/components/layout/PageHeader";
@@ -468,6 +469,67 @@ export default function AdminVisitsPage() {
     // Sort by days since last visit descending (longest absent first)
     return retentionList.sort((a, b) => b.daysSinceLastVisit - a.daysSinceLastVisit);
   }, [visits, patients]);
+
+  const handleExportRetentionExcel = async () => {
+    if (retentionPatients.length === 0) {
+      alert("Tidak ada data pasien untuk diekspor");
+      return;
+    }
+
+    try {
+      const formattedData = retentionPatients.map((rp, idx) => {
+        const formattedDate = rp.lastVisitDate.toLocaleDateString("id-ID", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        });
+
+        const cleanPhone = rp.patient.phone ? rp.patient.phone.replace(/^0/, "62").replace(/\D/g, "") : "";
+        const waMessage = encodeURIComponent(
+          `Halo Kak ${rp.patient.name},\nApa kabar? Semoga selalu sehat ya.\n\nKami dari Radja Bekam menyadari sudah ${rp.daysSinceLastVisit} hari sejak kunjungan terakhir Kakak. Yuk jaga kesehatan dengan rutinitas terapi bersama kami lagi. Ada promo khusus menanti Kakak!\n\nSilakan balas pesan ini untuk reservasi.`
+        );
+        const waLink = cleanPhone ? `https://wa.me/${cleanPhone}?text=${waMessage}` : "-";
+
+        return {
+          "No": idx + 1,
+          "Nama Pasien": rp.patient.name || "-",
+          "No. WhatsApp / HP": rp.patient.phone || "-",
+          "Jenis Kelamin": rp.patient.gender === "P" ? "Perempuan" : "Laki-laki",
+          "Alamat": rp.patient.address || "-",
+          "Kunjungan Terakhir": formattedDate,
+          "Lama Absen (Hari)": rp.daysSinceLastVisit,
+          "Status": rp.daysSinceLastVisit > 30 ? "Absen > 30 Hari (Prioritas Tinggi)" : "Absen > 14 Hari",
+          "Link WA Pengingat": waLink,
+        };
+      });
+
+      const XLSX = await import("xlsx");
+      const worksheet = XLSX.utils.json_to_sheet(formattedData);
+
+      worksheet["!cols"] = [
+        { wch: 6 },   // No
+        { wch: 25 },  // Nama Pasien
+        { wch: 20 },  // No. WhatsApp / HP
+        { wch: 15 },  // Jenis Kelamin
+        { wch: 30 },  // Alamat
+        { wch: 22 },  // Kunjungan Terakhir
+        { wch: 18 },  // Lama Absen (Hari)
+        { wch: 32 },  // Status
+        { wch: 45 },  // Link WA Pengingat
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Follow-up Pasien");
+
+      const todayStr = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
+      const fileName = `Data_Follow_Up_Retensi_Pasien_${todayStr}.xlsx`;
+
+      XLSX.writeFile(workbook, fileName);
+    } catch (err) {
+      console.error("Gagal export Excel:", err);
+      alert("Terjadi kesalahan saat mengexport file Excel");
+    }
+  };
 
   const handlePOSPhoneChange = (val: string) => {
     setPosPhone(val);
@@ -2536,15 +2598,26 @@ export default function AdminVisitsPage() {
         {/* ===== TAB: RETENTION ===== */}
         {activeTab === "retention" && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden animate-in fade-in duration-300">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-orange-50/30">
+            <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-orange-50/30">
               <div>
                 <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                   <MessageCircle className="w-5 h-5 text-orange-500" /> Follow-up & Retensi Pasien
                 </h3>
                 <p className="text-sm text-gray-500 mt-1">Daftar pasien yang belum berkunjung kembali selama lebih dari 14 hari.</p>
               </div>
-              <div className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm">
-                Total: {retentionPatients.length} Pasien
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleExportRetentionExcel}
+                  disabled={retentionPatients.length === 0}
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm shadow-emerald-600/20 active:scale-95 cursor-pointer"
+                  title="Export data follow-up ke file Excel (.xlsx)"
+                >
+                  <FileSpreadsheet className="w-4 h-4" /> Export Excel (.xlsx)
+                </button>
+                <div className="bg-orange-100 text-orange-700 px-3 py-2 rounded-xl text-sm font-bold shadow-sm">
+                  Total: {retentionPatients.length} Pasien
+                </div>
               </div>
             </div>
             
